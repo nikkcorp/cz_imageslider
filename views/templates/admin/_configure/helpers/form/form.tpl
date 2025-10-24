@@ -1,5 +1,5 @@
 {**
-* 2007-2017 PrestaShop
+* 2007-2016 PrestaShop
 *
 * NOTICE OF LICENSE
 *
@@ -17,109 +17,65 @@
 * versions in the future. If you wish to customize PrestaShop for your
 * needs please refer to http://www.prestashop.com for more information.
 *
-* @author    PrestaShop SA <contact@prestashop.com>
-* @copyright 2007-2017 PrestaShop SA
-* @license   http://opensource.org/licenses/afl-3.0.php  Academic Free License (AFL 3.0)
-* International Registered Trademark & Property of PrestaShop SA
+*  @author PrestaShop SA <contact@prestashop.com>
+*  @copyright  2007-2016 PrestaShop SA
+*  @license    http://opensource.org/licenses/afl-3.0.php  Academic Free License (AFL 3.0)
+*  International Registered Trademark & Property of PrestaShop SA
 *}
 
 {extends file="helpers/form/form.tpl"}
-
-{block name="script"}
-$(document).ready(function(){
-$('#menuOrderUp').click(function(e){
-	e.preventDefault();
-    move(true);
-});
-$('#menuOrderDown').click(function(e){
-    e.preventDefault();
-    move();
-});
-$("#items").closest('form').on('submit', function(e) {
-	$("#items option").prop('selected', true);
-});
-$("#addItem").click(add);
-$("#availableItems").dblclick(add);
-$("#removeItem").click(remove);
-$("#items").dblclick(remove);
-function add()
-{
-	$("#availableItems option:selected").each(function(i){
-		var val = $(this).val();
-		var text = $(this).text();
-		text = text.replace(/(^\s*)|(\s*$)/gi,"");
-		if (val == "PRODUCT")
-		{
-			val = prompt('{l s="Indicate the ID number for the product" mod='ps_mainmenu' js=1}');
-			if (val == null || val == "" || isNaN(val))
-				return;
-			text = '{l s="Product ID #" mod='ps_mainmenu' js=1}'+val;
-			val = "PRD"+val;
-		}
-		$("#items").append('<option value="'+val+'" selected="selected">'+text+'</option>');
-	});
-	serialize();
-	return false;
-}
-function remove()
-{
-	$("#items option:selected").each(function(i){
-		$(this).remove();
-	});
-	serialize();
-	return false;
-}
-function serialize()
-{
-	var options = "";
-	$("#items option").each(function(i){
-		options += $(this).val()+",";
-	});
-	$("#itemsInput").val(options.substr(0, options.length - 1));
-}
-function move(up)
-{
-        var tomove = $('#items option:selected');
-        if (tomove.length >1)
-        {
-                alert('{l s="Please select just one item" mod='ps_mainmenu'}');
-                return false;
-        }
-        if (up)
-                tomove.prev().insertAfter(tomove);
-        else
-                tomove.next().insertBefore(tomove);
-        serialize();
-        return false;
-}
-});
-{/block}
-
-{block name="input"}
-    {if $input.type == 'link_choice'}
-	    <div class="row">
-	    	<div class="col-lg-1">
-	    		<h4 style="margin-top:5px;">{l s='Change position' mod='ps_mainmenu'}</h4> 
-                <a href="#" id="menuOrderUp" class="btn btn-default" style="font-size:20px;display:block;"><i class="icon-chevron-up"></i></a><br/>
-                <a href="#" id="menuOrderDown" class="btn btn-default" style="font-size:20px;display:block;"><i class="icon-chevron-down"></i></a><br/>
-	    	</div>
-	    	<div class="col-lg-4">
-	    		<h4 style="margin-top:5px;">{l s='Selected items' mod='ps_mainmenu'}</h4>
-	    		{$selected_links}
-	    	</div>
-	    	<div class="col-lg-4">
-	    		<h4 style="margin-top:5px;">{l s='Available items' mod='ps_mainmenu'}</h4>
-	    		{$choices}
-	    	</div>
-
-	    </div>
-	    <br/>
-	    <div class="row">
-	    	<div class="col-lg-1"></div>
-	    	<div class="col-lg-4"><a href="#" id="removeItem" class="btn btn-default"><i class="icon-arrow-right"></i> {l s='Remove' mod='ps_mainmenu'}</a></div>
-	    	<div class="col-lg-4"><a href="#" id="addItem" class="btn btn-default"><i class="icon-arrow-left"></i> {l s='Add' mod='ps_mainmenu'}</a></div>
-	    </div>
-	{else}
-		{$smarty.block.parent}
-    {/if}
+{block name="field"}
+	{if $input.type == 'file_lang'}
+		<div class="row">
+			{foreach from=$languages item=language}
+				{if $languages|count > 1}
+					<div class="translatable-field lang-{$language.id_lang}" {if $language.id_lang != $defaultFormLanguage}style="display:none"{/if}>
+				{/if}
+					<div class="col-lg-6">
+						{if isset($fields[0]['form']['images'])}
+						<img src="{$image_baseurl}{$fields[0]['form']['images'][$language.id_lang]}" class="img-thumbnail" />
+						{/if}
+						<div class="dummyfile input-group">
+							<input id="{$input.name}_{$language.id_lang}" type="file" name="{$input.name}_{$language.id_lang}" class="hide-file-upload" />
+							<span class="input-group-addon"><i class="icon-file"></i></span>
+							<input id="{$input.name}_{$language.id_lang}-name" type="text" class="disabled" name="filename" readonly />
+							<span class="input-group-btn">
+								<button id="{$input.name}_{$language.id_lang}-selectbutton" type="button" name="submitAddAttachments" class="btn btn-default">
+									<i class="icon-folder-open"></i> {l s='Choose a file' d='Admin.Actions'}
+								</button>
+							</span>
+						</div>
+					</div>
+				{if $languages|count > 1}
+					<div class="col-lg-2">
+						<button type="button" class="btn btn-default dropdown-toggle" tabindex="-1" data-toggle="dropdown">
+							{$language.iso_code}
+							<span class="caret"></span>
+						</button>
+						<ul class="dropdown-menu">
+							{foreach from=$languages item=lang}
+							<li><a href="javascript:hideOtherLanguage({$lang.id_lang});" tabindex="-1">{$lang.name}</a></li>
+							{/foreach}
+						</ul>
+					</div>
+				{/if}
+				{if $languages|count > 1}
+					</div>
+				{/if}
+				<script>
+				$(document).ready(function(){
+					$('#{$input.name}_{$language.id_lang}-selectbutton').click(function(e){
+						$('#{$input.name}_{$language.id_lang}').trigger('click');
+					});
+					$('#{$input.name}_{$language.id_lang}').change(function(e){
+						var val = $(this).val();
+						var file = val.split(/[\\/]/);
+						$('#{$input.name}_{$language.id_lang}-name').val(file[file.length-1]);
+					});
+				});
+			</script>
+			{/foreach}
+		</div>
+	{/if}
+	{$smarty.block.parent}
 {/block}

@@ -1,6 +1,5 @@
-<?php
-/*
-* 2007-2015 PrestaShop
+{**
+* 2007-2016 PrestaShop
 *
 * NOTICE OF LICENSE
 *
@@ -19,17 +18,23 @@
 * needs please refer to http://www.prestashop.com for more information.
 *
 *  @author PrestaShop SA <contact@prestashop.com>
-*  @copyright  2007-2015 PrestaShop SA
+*  @copyright  2007-2016 PrestaShop SA
 *  @license    http://opensource.org/licenses/afl-3.0.php  Academic Free License (AFL 3.0)
 *  International Registered Trademark & Property of PrestaShop SA
-*/
-                        
-header("Expires: Mon, 26 Jul 1997 05:00:00 GMT");
-header("Last-Modified: ".gmdate("D, d M Y H:i:s")." GMT");
-                        
-header("Cache-Control: no-store, no-cache, must-revalidate");
-header("Cache-Control: post-check=0, pre-check=0", false);
-header("Pragma: no-cache");
-                        
-header("Location: ../");
-exit;
+*}
+
+{if $czhomeslider.slides}
+	<div class="flexslider" data-interval="{$czhomeslider.speed}" data-pause="{$czhomeslider.pause}">
+		<div class="loadingdiv spinner"></div>
+		<ul class="slides">
+			{foreach from=$czhomeslider.slides item=slide}
+				<li class="slide">
+					<a href="{$slide.url}" title="{$slide.legend}">
+						<img src="{$slide.image_url}" alt="{$slide.legend}" title="{$slide.title}" />
+					</a>				
+				</li>
+			{/foreach}
+		</ul>
+	</div>
+{/if}
+
