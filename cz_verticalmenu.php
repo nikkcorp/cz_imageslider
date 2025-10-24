@@ -56,7 +56,7 @@ class Cz_VerticalMenu extends Module implements WidgetInterface
     {
         $this->name = 'cz_verticalmenu';
         $this->tab = 'front_office_features';
-        $this->version = '1.0.5';
+        $this->version = '1.0.6';
         $this->author = 'Codezeel';
 
         $this->bootstrap = true;
@@ -199,7 +199,7 @@ class Cz_VerticalMenu extends Module implements WidgetInterface
                     }
                 }
 				
-				$number_cols = Tools::getValue('number_cols_menu');
+				$number_cols = (int)Tools::getValue('number_cols_menu');
 				$updated &= Configuration::updateValue('MOD_CZVERTICALMENU_COLS', (string)$number_cols, false, (int)$shop_group_id, (int)$shop_id);
 				
                 if (!$updated) {
@@ -238,7 +238,7 @@ class Cz_VerticalMenu extends Module implements WidgetInterface
                         $shops = Shop::getContextListShopID();
 
                         foreach ($shops as $shop_id) {
-                            $added = Cz_VerticalMenuTopLinks::add($links_label, $labels,  Tools::getValue('new_window', 0), (int)$shop_id);
+                            $added = Cz_VerticalMenuTopLinks::add($links_label, $labels, (int)Tools::getValue('new_window', 0), (int)$shop_id);
 
                             if (!$added) {
                                 $shop = new Shop($shop_id);
@@ -256,12 +256,12 @@ class Cz_VerticalMenu extends Module implements WidgetInterface
                 $update_cache = true;
             } elseif (Tools::isSubmit('deleteczverticalmenu')) {
                 $errors_delete_link = array();
-                $id_czverticalmenu = Tools::getValue('id_czverticalmenu', 0);
+                $id_czverticalmenu = (int)Tools::getValue('id_czverticalmenu', 0);
                 $shops = Shop::getContextListShopID();
 
                 foreach ($shops as $shop_id) {
                     $deleted = Cz_VerticalMenuTopLinks::remove($id_czverticalmenu, (int)$shop_id);
-                    Configuration::updateValue('MOD_CZVERTICALMENU_ITEMS', str_replace(array('LNK'.$id_czverticalmenu.',', 'LNK'.$id_czverticalmenu), '', Configuration::get('MOD_CZVERTICALMENU_ITEMS')));
+                    Configuration::updateValue('MOD_CZVERTICALMENU_ITEMS', str_replace(array('LNK'.(int)$id_czverticalmenu.',', 'LNK'.(int)$id_czverticalmenu), '', Configuration::get('MOD_CZVERTICALMENU_ITEMS')));
 
                     if (!$deleted) {
                         $shop = new Shop($shop_id);
@@ -1119,14 +1119,14 @@ class Cz_VerticalMenu extends Module implements WidgetInterface
 
         foreach ($czverticalmenu as $id => $link) {
             $lang = Db::getInstance()->executeS('
-					SELECT id_lang, '.(int)$params['new_id_shop'].', label, link
+					SELECT id_lang, '.(int)$params['new_id_shop'].' as new_id_shop, label, link
 					FROM '._DB_PREFIX_.'czverticalmenu_lang
 					WHERE id_czverticalmenu = '.(int)$link['id_czverticalmenu'].' AND id_shop = '.(int)$params['old_id_shop']);
 
             foreach ($lang as $l) {
                 Db::getInstance()->execute('
 					INSERT IGNORE INTO '._DB_PREFIX_.'czverticalmenu_lang (id_czverticalmenu, id_lang, id_shop, label, link)
-					VALUES ('.(int)$link['new_id_czverticalmenu'].', '.(int)$l['id_lang'].', '.(int)$params['new_id_shop'].', '.(int)$l['label'].', '.(int)$l['link'].' )');
+					VALUES ('.(int)$link['new_id_czverticalmenu'].', '.(int)$l['id_lang'].', '.(int)$params['new_id_shop'].', "'.pSQL($l['label']).'", "'.pSQL($l['link']).'" )');
             }
         }
     }
