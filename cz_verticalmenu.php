@@ -56,7 +56,7 @@ class Cz_VerticalMenu extends Module implements WidgetInterface
     {
         $this->name = 'cz_verticalmenu';
         $this->tab = 'front_office_features';
-        $this->version = '1.0.4';
+        $this->version = '1.0.5';
         $this->author = 'Codezeel';
 
         $this->bootstrap = true;
@@ -65,6 +65,11 @@ class Cz_VerticalMenu extends Module implements WidgetInterface
         $this->displayName = $this->l('CZ - Vertical Menu');
         $this->description = $this->l('Adds a vertical menu to the left sidebar of your e-commerce website.');
         $this->ps_versions_compliancy = array('min' => '1.7.0.0', 'max' => _PS_VERSION_);
+
+        // Performance optimization: limit category depth
+        if (!defined('CZ_VERTICALMENU_MAX_DEPTH')) {
+            define('CZ_VERTICALMENU_MAX_DEPTH', (int)Configuration::get('CZ_VERTICALMENU_MAX_DEPTH') ?: 3);
+        }
     }
 
     public function install($delete_params = true)
@@ -93,7 +98,10 @@ class Cz_VerticalMenu extends Module implements WidgetInterface
         }
 
         if ($delete_params) {
-            if (!$this->installDb() || !Configuration::updateGlobalValue('MOD_CZVERTICALMENU_ITEMS', 'CAT3')) {
+            if (!$this->installDb() ||
+                !Configuration::updateGlobalValue('MOD_CZVERTICALMENU_ITEMS', 'CAT3') ||
+                !Configuration::updateGlobalValue('CZ_VERTICALMENU_MAX_DEPTH', 3) ||
+                !Configuration::updateGlobalValue('CZ_VERTICALMENU_CACHE_ENABLED', 1)) {
                 return false;
             }
         }
@@ -108,7 +116,7 @@ class Cz_VerticalMenu extends Module implements WidgetInterface
 			`id_czverticalmenu` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
 			`id_shop` INT(11) UNSIGNED NOT NULL,
 			`new_window` TINYINT( 1 ) NOT NULL,
-			INDEX (`id_shop`)
+			INDEX `idx_shop` (`id_shop`)
 		) ENGINE = '._MYSQL_ENGINE_.' CHARACTER SET utf8 COLLATE utf8_general_ci;') &&
             Db::getInstance()->execute('
 			 CREATE TABLE IF NOT EXISTS `'._DB_PREFIX_.'czverticalmenu_lang` (
@@ -117,7 +125,8 @@ class Cz_VerticalMenu extends Module implements WidgetInterface
 			`id_shop` INT(11) UNSIGNED NOT NULL,
 			`label` VARCHAR( 128 ) NOT NULL ,
 			`link` VARCHAR( 128 ) NOT NULL ,
-			INDEX ( `id_czverticalmenu` , `id_lang`, `id_shop`)
+			INDEX `idx_menu_lang_shop` ( `id_czverticalmenu` , `id_lang`, `id_shop`),
+			INDEX `idx_lang_shop` (`id_lang`, `id_shop`)
 		) ENGINE = '._MYSQL_ENGINE_.' CHARACTER SET utf8 COLLATE utf8_general_ci;'));
     }
 
@@ -545,10 +554,12 @@ class Cz_VerticalMenu extends Module implements WidgetInterface
 			$width = 240;
             switch (Tools::substr($item, 0, Tools::strlen($value[1]))) {
                 case 'CAT':
-                    $categories = $this->generateCategoriesMenu(
-                        Category::getNestedCategories($id, $id_lang, false, $this->user_groups) //, $number_col, $width
-                    );
-                    $root_node['children'] = array_merge($root_node['children'], $categories);
+                    // OPTIMIZATION: Use optimized method with depth limit
+                    $nestedCategories = $this->getNestedCategoriesOptimized($id, $id_lang, $this->user_groups);
+                    if (!empty($nestedCategories)) {
+                        $categories = $this->generateCategoriesMenu($nestedCategories);
+                        $root_node['children'] = array_merge($root_node['children'], $categories);
+                    }
                     break;
 
                 case 'PRD':
@@ -581,18 +592,29 @@ class Cz_VerticalMenu extends Module implements WidgetInterface
 
                 // Case to handle the option to show all Manufacturers
                 case 'ALLMAN':
-                    $children = array_map(function ($manufacturer) use ($id_lang) {
-                        return $this->makeNode([
-                            'type' => 'manufacturer',
-                            'page_identifier' => 'manufacturer-' . $manufacturer['id_manufacturer'],
-                            'label' => $manufacturer['name'],
-                            'url' => $this->context->link->getManufacturerLink(
-                                new Manufacturer($manufacturer['id_manufacturer'], $id_lang),
-                                null,
-                                $id_lang
-                            )
-                        ]);
-                    }, Manufacturer::getManufacturers());
+                    // OPTIMIZATION: Limit manufacturers and use cache
+                    $cache_id_man = 'cz_verticalmenu_manufacturers_' . (int)$id_lang . '_' . (int)$id_shop;
+                    if (Configuration::get('CZ_VERTICALMENU_CACHE_ENABLED') && Cache::isStored($cache_id_man)) {
+                        $children = Cache::retrieve($cache_id_man);
+                    } else {
+                        $manufacturers = Manufacturer::getManufacturers(false, $id_lang, true, 1, 50, false);
+                        $children = array_map(function ($manufacturer) use ($id_lang) {
+                            return $this->makeNode([
+                                'type' => 'manufacturer',
+                                'page_identifier' => 'manufacturer-' . $manufacturer['id_manufacturer'],
+                                'label' => $manufacturer['name'],
+                                'url' => $this->context->link->getManufacturerLink(
+                                    (int)$manufacturer['id_manufacturer'],
+                                    null,
+                                    $id_lang
+                                )
+                            ]);
+                        }, $manufacturers);
+
+                        if (Configuration::get('CZ_VERTICALMENU_CACHE_ENABLED')) {
+                            Cache::store($cache_id_man, $children);
+                        }
+                    }
 
                     $root_node['children'][] = $this->makeNode([
                         'type' => 'manufacturers',
@@ -621,18 +643,29 @@ class Cz_VerticalMenu extends Module implements WidgetInterface
 
                 // Case to handle the option to show all Suppliers
                 case 'ALLSUP':
-                    $children = array_map(function ($supplier) use ($id_lang) {
-                        return $this->makeNode([
-                            'type' => 'supplier',
-                            'page_identifier' => 'supplier-' . $supplier['id_supplier'],
-                            'label' => $supplier['name'],
-                            'url' => $this->context->link->getSupplierLink(
-                                new Supplier($supplier['id_supplier'], $id_lang),
-                                null,
-                                $id_lang
-                            )
-                        ]);
-                    }, Supplier::getSuppliers());
+                    // OPTIMIZATION: Limit suppliers and use cache
+                    $cache_id_sup = 'cz_verticalmenu_suppliers_' . (int)$id_lang . '_' . (int)$id_shop;
+                    if (Configuration::get('CZ_VERTICALMENU_CACHE_ENABLED') && Cache::isStored($cache_id_sup)) {
+                        $children = Cache::retrieve($cache_id_sup);
+                    } else {
+                        $suppliers = Supplier::getSuppliers(false, $id_lang, true, 1, 50, false);
+                        $children = array_map(function ($supplier) use ($id_lang) {
+                            return $this->makeNode([
+                                'type' => 'supplier',
+                                'page_identifier' => 'supplier-' . $supplier['id_supplier'],
+                                'label' => $supplier['name'],
+                                'url' => $this->context->link->getSupplierLink(
+                                    (int)$supplier['id_supplier'],
+                                    null,
+                                    $id_lang
+                                )
+                            ]);
+                        }, $suppliers);
+
+                        if (Configuration::get('CZ_VERTICALMENU_CACHE_ENABLED')) {
+                            Cache::store($cache_id_sup, $children);
+                        }
+                    }
 
                     $root_node['children'][] = $this->makeNode([
                         'type' => 'suppliers',
@@ -703,6 +736,80 @@ class Cz_VerticalMenu extends Module implements WidgetInterface
         return $cb($node, $depth);
     }
 
+    /**
+     * OPTIMIZATION: Get nested categories with depth limit and caching
+     */
+    protected function getNestedCategoriesOptimized($root_category, $id_lang, $groups = null)
+    {
+        $cache_id = 'cz_verticalmenu_nested_cat_' . (int)$root_category . '_' . (int)$id_lang . '_' . (int)$this->context->shop->id;
+
+        if (Configuration::get('CZ_VERTICALMENU_CACHE_ENABLED') && Cache::isStored($cache_id)) {
+            return Cache::retrieve($cache_id);
+        }
+
+        $max_depth = CZ_VERTICALMENU_MAX_DEPTH;
+        $id_shop = (int)$this->context->shop->id;
+
+        // OPTIMIZATION: Use single optimized query instead of recursive calls
+        $sql = 'SELECT c.id_category, c.id_parent, c.level_depth, c.active, c.position, c.nleft, c.nright,
+                cl.name, cl.link_rewrite, cs.id_shop
+                FROM `'._DB_PREFIX_.'category` c
+                INNER JOIN `'._DB_PREFIX_.'category_shop` cs ON (c.id_category = cs.id_category AND cs.id_shop = '.(int)$id_shop.')
+                LEFT JOIN `'._DB_PREFIX_.'category_lang` cl ON (c.id_category = cl.id_category AND cl.id_shop = '.(int)$id_shop.' AND cl.id_lang = '.(int)$id_lang.')
+                WHERE c.active = 1
+                AND c.id_category = '.(int)$root_category.'
+                ORDER BY c.level_depth ASC, cs.position ASC
+                LIMIT 1';
+
+        $root = Db::getInstance()->getRow($sql);
+
+        if (!$root) {
+            return [];
+        }
+
+        // Get all children up to max depth using nested set model
+        $sql = 'SELECT c.id_category, c.id_parent, c.level_depth, c.active, c.position,
+                cl.name, cl.link_rewrite, cs.id_shop
+                FROM `'._DB_PREFIX_.'category` c
+                INNER JOIN `'._DB_PREFIX_.'category_shop` cs ON (c.id_category = cs.id_category AND cs.id_shop = '.(int)$id_shop.')
+                LEFT JOIN `'._DB_PREFIX_.'category_lang` cl ON (c.id_category = cl.id_category AND cl.id_shop = '.(int)$id_shop.' AND cl.id_lang = '.(int)$id_lang.')
+                WHERE c.active = 1
+                AND c.nleft > '.(int)$root['nleft'].'
+                AND c.nright < '.(int)$root['nright'].'
+                AND c.level_depth <= '.((int)$root['level_depth'] + (int)$max_depth).'
+                ORDER BY c.level_depth ASC, cs.position ASC';
+
+        $categories = Db::getInstance()->executeS($sql);
+
+        if (!$categories) {
+            $categories = [];
+        }
+
+        // Build tree structure
+        $tree = [];
+        $indexed = [];
+
+        // Add root
+        $indexed[$root['id_category']] = $root;
+        $indexed[$root['id_category']]['children'] = [];
+        $tree[$root['id_category']] = &$indexed[$root['id_category']];
+
+        foreach ($categories as $category) {
+            $indexed[$category['id_category']] = $category;
+            $indexed[$category['id_category']]['children'] = [];
+
+            if (isset($indexed[$category['id_parent']])) {
+                $indexed[$category['id_parent']]['children'][$category['id_category']] = &$indexed[$category['id_category']];
+            }
+        }
+
+        if (Configuration::get('CZ_VERTICALMENU_CACHE_ENABLED')) {
+            Cache::store($cache_id, $tree);
+        }
+
+        return $tree;
+    }
+
     protected function generateCategoriesOption($categories, $items_to_skip = null)
     {
         $html = '';
@@ -721,9 +828,15 @@ class Cz_VerticalMenu extends Module implements WidgetInterface
         return $html;
     }
 
-    protected function generateCategoriesMenu($categories, $is_children = 0, $cat_images = null)
+    protected function generateCategoriesMenu($categories, $is_children = 0, $cat_images = null, $current_depth = 0)
     {
         $nodes = [];
+        $max_depth = CZ_VERTICALMENU_MAX_DEPTH;
+
+        // OPTIMIZATION: Stop recursion if max depth reached
+        if ($current_depth >= $max_depth) {
+            return $nodes;
+        }
 
         // OPTIMIZATION: Load category images only once at the top level
         if ($is_children == 0 && $cat_images === null) {
@@ -736,9 +849,12 @@ class Cz_VerticalMenu extends Module implements WidgetInterface
         foreach ($categories as $key => $category) {
             $node = $this->makeNode([]);
 
+            // OPTIMIZATION: Use context link instead of creating Category object
             if ($category['level_depth'] > 1) {
-                $cat = new Category($category['id_category']);
-                $link = $cat->getLink();
+                $link = $this->context->link->getCategoryLink(
+                    $category['id_category'],
+                    isset($category['link_rewrite']) ? $category['link_rewrite'] : null
+                );
             } else {
                 $link = $this->context->link->getPageLink('index');
             }
@@ -757,9 +873,9 @@ class Cz_VerticalMenu extends Module implements WidgetInterface
             $node['label']   = $category['name'];
             $node['image_urls']  = [];
 
-            if (isset($category['children']) && !empty($category['children'])) {
-                // OPTIMIZATION: Pass $cat_images to recursive calls to avoid multiple scandir
-                $node['children'] = $this->generateCategoriesMenu($category['children'], 1, $cat_images);
+            if (isset($category['children']) && !empty($category['children']) && $current_depth < ($max_depth - 1)) {
+                // OPTIMIZATION: Pass depth parameter to limit recursion
+                $node['children'] = $this->generateCategoriesMenu($category['children'], 1, $cat_images, $current_depth + 1);
 
                 // OPTIMIZATION: Use pre-loaded $cat_images instead of calling scandir again
                 if (!empty($cat_images) && count(preg_grep('/^'.$category['id_category'].'-([0-9])?_thumb.jpg/i', $cat_images)) > 0) {
@@ -1173,7 +1289,8 @@ class Cz_VerticalMenu extends Module implements WidgetInterface
         $html .= '<optgroup label="'.$this->l('Supplier').'">';
         // Option to show all Suppliers
         $html .= '<option value="ALLSUP0">'.$this->l('All suppliers').'</option>';
-        $suppliers = Supplier::getSuppliers(false, $this->context->language->id);
+        // OPTIMIZATION: Limit to 100 suppliers in admin dropdown
+        $suppliers = Supplier::getSuppliers(false, $this->context->language->id, true, 1, 100);
         foreach ($suppliers as $supplier) {
             if (!in_array('SUP'.$supplier['id_supplier'], $items)) {
                 $html .= '<option value="SUP'.$supplier['id_supplier'].'">'.$spacer.$supplier['name'].'</option>';
@@ -1185,7 +1302,8 @@ class Cz_VerticalMenu extends Module implements WidgetInterface
         $html .= '<optgroup label="'.$this->l('Manufacturer').'">';
         // Option to show all Manufacturers
         $html .= '<option value="ALLMAN0">'.$this->l('All manufacturers').'</option>';
-        $manufacturers = Manufacturer::getManufacturers(false, $this->context->language->id);
+        // OPTIMIZATION: Limit to 100 manufacturers in admin dropdown
+        $manufacturers = Manufacturer::getManufacturers(false, $this->context->language->id, true, 1, 100);
         foreach ($manufacturers as $manufacturer) {
             if (!in_array('MAN'.$manufacturer['id_manufacturer'], $items)) {
                 $html .= '<option value="MAN'.$manufacturer['id_manufacturer'].'">'.$spacer.$manufacturer['name'].'</option>';
